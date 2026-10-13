@@ -1,17 +1,22 @@
 module Parser.Ast where
 
-import qualified Scanner
+import Scanner (Operator)
 
 
--- Need to refine this with better constructors
-data Ast
-  = Node Scanner.Token [Ast]
-  | Leaf Scanner.Token
-  deriving (Eq)
+data Expression 
+  = Num Double
+  | Var String
+  | Unary Operator Expression
+  | Binary Operator Expression Expression
+  deriving(Show, Eq)
 
-
--- You may define your own pretty-print, or just use Haskell's default implementation
-instance Show Ast where
-  show :: Ast -> String
-  show (Node token asts) = show token ++ show asts
-  show (Leaf token) = show token
+data Statement 
+  = Print Expression
+  | Scan String
+  | Assign String Expression
+  | If Expression Statement
+  | IfElse Expression Statement Statement
+  | Block [Statement]
+  | While Expression Statement
+  | DoWhile Statement Expression
+  deriving (Show, Eq)

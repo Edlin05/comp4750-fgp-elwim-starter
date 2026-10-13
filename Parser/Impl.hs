@@ -3,12 +3,13 @@ module Parser.Impl (parse) where
 import Control.Applicative (many, some, optional, (<|>))
 
 import Parser.Precedence
-import Parser.Ast as Ast
+import qualified Parser.Ast as Ast
 
 import qualified Stream
 import qualified Source
 import qualified Scanner
 import Scanner (Token(..), PosToken(..), TokenItr)
+import Distribution.TestSuite (TestInstance(name))
 
 
 
@@ -38,38 +39,46 @@ requireToken :: Token -> Parser Token
 requireToken token = Stream.require (parseToken token) ("expected: " ++ show token)
 
 
-requirePrimary :: Parser Ast
+requirePrimary :: Parser Ast.Expression
 requirePrimary = Stream.require parsePrimary "expected expression"
 
 
-requireExpression :: Parser Ast
+requireExpression :: Parser Ast.Expression
 requireExpression = Stream.require parseExpr "expected expression"
 
 
-requireStatement :: Parser Ast
+requireStatement :: Parser Ast.Statement
 requireStatement = Stream.require parseStatement "expected statement"
 
 
-parseVariable :: Parser Ast
+parseVariable :: Parser Ast.Expression
 parseVariable = do
   token <- Stream.satisfy isIdentifier
-  return $ Ast.Leaf token
+  case token of
+    Identifier name -> return $ Ast.Var name
+    _ -> fail "expect Identifier"
+  
 
 
-parseNumber :: Parser Ast
+parseNumber :: Parser Ast.Expression
 parseNumber = do
   token <- Stream.satisfy isNumber
-  return $ Ast.Leaf token
+  case token of
+    Number num -> return $ Ast.Num num
+    _ -> fail "expect number"
 
 
-parseUnary :: Parser Ast
+parseUnary :: Parser Ast.Expression
 parseUnary = do
   opToken <- Stream.satisfy isUnaryOperator
-  expr <- requirePrimary
-  return $ Ast.Node opToken [expr]
+  case opToken of
+    Operator op -> do
+      expr <- requirePrimary
+      return $ Ast.Unary op expr
+    _ -> fail "needs a unary operator"
 
 
-parseNested :: Parser Ast
+parseNested :: Parser Ast.Expression
 parseNested = do
   parseToken LeftParen
   expr <- requireExpression
@@ -77,11 +86,11 @@ parseNested = do
   return expr
 
 
-parsePrimary :: Parser Ast
+parsePrimary :: Parser Ast.Expression
 parsePrimary = parseNumber <|> parseVariable <|> parseUnary <|> parseNested
 
 
-parseExpr :: Parser Ast
+parseExpr :: Parser Ast.Expression
 parseExpr = do
   expr <- parsePrimary
   moreOperators expr 0
@@ -94,44 +103,48 @@ parseExpr = do
               Stream.getNext -- now we can consume
               rhs <- requirePrimary
               rhsExpanded <- moreOperators rhs (precedenceOf op)
-              moreOperators (Ast.Node (Operator op) [lhs, rhsExpanded]) minPrecedence
+              moreOperators (Ast.Binary op lhs rhsExpanded) minPrecedence
         _ -> return lhs
 
 
-parsePrint :: Parser Ast
+parsePrint :: Parser Ast.Statement
 parsePrint = do
   parseToken Print
   expr <- requireExpression
   requireToken Semicolon
-  return $ Ast.Node Print [expr]
+  return $ Ast.Print expr
 
 
-parseScan :: Parser Ast
+parseScan :: Parser Ast.Statement
 parseScan = do
   parseToken Scan
-  var <- Stream.require (Stream.satisfy isIdentifier) "expected variable"
+  token <- Stream.require (Stream.satisfy isIdentifier) "expected variable"
   requireToken Semicolon
-  return $ Ast.Node Scan [Ast.Leaf var]
+  case token of 
+    Identifier var -> return $ Ast.Scan var
+    _ -> fail "expect var name"
 
 
-parseAssignment :: Parser Ast
+parseAssignment :: Parser Ast.Statement
 parseAssignment = do
-  var <- Stream.satisfy isIdentifier
+  token <- Stream.satisfy isIdentifier
   requireToken Assign
   value <- requireExpression
   requireToken Semicolon
-  return $ Ast.Node Assign [Ast.Leaf var, value]
+  case token of 
+    Identifier var -> return $ Ast.Assign var value
+    _ -> fail "expect var name"
 
 
-parseBlock :: Parser Ast
+parseBlock :: Parser Ast.Statement
 parseBlock = do
   parseToken LeftBrace
   stmts <- many parseStatement
   requireToken RightBrace
-  return $ Ast.Node LeftBrace stmts
+  return $ Ast.Block stmts
 
 
-parseIf :: Parser Ast
+parseIf :: Parser Ast.Statement
 parseIf = do
   parseToken If
   requireToken LeftParen
@@ -140,25 +153,25 @@ parseIf = do
   thenStmt <- requireStatement
   maybeElse <- optional parseElse
   case maybeElse of
-    Just elseStmt -> return $ Ast.Node Else [expr, thenStmt, elseStmt]
-    Nothing       -> return $ Ast.Node If [expr, thenStmt]
+    Just elseStmt -> return $ Ast.IfElse expr thenStmt elseStmt
+    Nothing       -> return $ Ast.If expr thenStmt
   where
     parseElse = do
       parseToken Else
       requireStatement
 
 
-parseWhile :: Parser Ast
+parseWhile :: Parser Ast.Statement
 parseWhile = do
   parseToken While
   requireToken LeftParen
   expr <- requireExpression
   requireToken RightParen
   stmt <- requireStatement
-  return $ Ast.Node While [expr, stmt]
+  return $ Ast.While expr stmt
 
 
-parseDoWhile :: Parser Ast
+parseDoWhile :: Parser Ast.Statement
 parseDoWhile = do
   parseToken Do
   stmt <- requireStatement
@@ -167,23 +180,23 @@ parseDoWhile = do
   expr <- requireExpression
   requireToken RightParen
   requireToken Semicolon
-  return $ Ast.Node Do [expr, stmt]
+  return $ Ast.DoWhile stmt expr
 
 
-parseStatement :: Parser Ast
+parseStatement :: Parser Ast.Statement
 parseStatement = parsePrint <|> parseScan <|> parseAssignment <|> parseBlock <|> parseIf <|> parseWhile <|> parseDoWhile
 
 
-parseAll :: Parser Ast
+parseAll :: Parser Ast.Statement
 parseAll = do
   statements <- many parseStatement
   eof <- Stream.getEof
   if eof
-    then return $ Ast.Node LeftBrace statements
+    then return $ Ast.Block statements
     else do
       token <- Stream.peekNext
       fail $ "unexpected: " ++ show token
 
 
-parse :: [PosToken] -> Either (Source.Position, String) Ast
+parse :: [PosToken] -> Either (Source.Position, String) Ast.Statement
 parse tokens = Stream.processResult parseAll (Scanner.begin tokens)

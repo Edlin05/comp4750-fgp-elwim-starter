@@ -1,7 +1,7 @@
 import qualified Scanner
 import qualified Parser
 import Interpreter (Context, execute)
-import GHC.Internal.System.Environment (getArgs)
+import System.Environment (getArgs)
 import qualified Data.Map as Map
 
 procFiles :: [String] -> Context -> IO()

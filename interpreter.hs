@@ -10,6 +10,7 @@ import MoreIO (promptNumber)
 
 type Context = Map String Double
 
+
 fmod :: Double -> Double -> Double
 fmod x y = x - y * fromIntegral (truncate (x/y)::Integer)
 
